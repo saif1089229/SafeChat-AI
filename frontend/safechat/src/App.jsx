@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import './App.css';
+import { api } from './api';
+import Login from './Login';
+import ProfilesAndFriends from './ProfilesAndFriends';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-const TEST_USER_ID = 1;
 const CHANNELS = [
   { id: 1, name: '# general' },
 ];
@@ -76,7 +77,7 @@ function MessageInput({ value, onChange, onSend, onImage, busy }) {
   );
 }
 
-export default function App() {
+function Chat({ me, onProfileChange, onLogout }) {
   const [activeChannel, setActiveChannel] = useState(CHANNELS[0].id);
   const [draft, setDraft] = useState('');
   const [messages, setMessages] = useState([]);
@@ -90,11 +91,9 @@ export default function App() {
 
     async function loadMessages() {
       try {
-        const response = await fetch(`${API_URL}/messages`, {
+        const savedMessages = await api('/messages', {
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error('Could not load messages.');
-        const savedMessages = await response.json();
         setMessages(savedMessages);
       } catch {
         if (!controller.signal.aborted) {
@@ -115,13 +114,11 @@ export default function App() {
     setSending(true);
     setError('');
     try {
-      const response = await fetch(`${API_URL}/messages`, {
+      const savedMessage = await api('/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: TEST_USER_ID, channel_id: activeChannel, text }),
+        body: JSON.stringify({ channel_id: activeChannel, text }),
       });
-      if (!response.ok) throw new Error('Could not send message.');
-      const savedMessage = await response.json();
       setMessages((current) => [...current, savedMessage]);
       setDraft((current) => current.trim() === text ? '' : current);
       setWarning('No warnings.');
@@ -140,6 +137,8 @@ export default function App() {
     <div className="chat-app">
       <header className="app-header">
         <h1>SafeChat AI</h1>
+        <span>{me.name}</span>
+        <button type="button" onClick={onLogout}>Sign out</button>
       </header>
       <div className="chat-body">
         <ChannelList
@@ -160,7 +159,43 @@ export default function App() {
             busy={sending || loading}
           />
         </main>
+        <ProfilesAndFriends me={me} onProfileChange={onProfileChange} />
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  const [me, setMe] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    api('/me')
+      .then((user) => { if (active) setMe(user); })
+      .catch((err) => { if (active && err.status !== 401) setError('Could not connect to SafeChat. Check the backend.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function logout() {
+    setError('');
+    try {
+      await api('/logout', { method: 'POST' });
+      setMe(null);
+    } catch {
+      setError('Could not sign out. Please try again.');
+    }
+  }
+
+  if (loading) return <p role="status">Loading...</p>;
+  return (
+    <>
+      {error && <p role="alert">{error}</p>}
+      {me ? <Chat key={me.id} me={me} onProfileChange={setMe} onLogout={logout} /> : (
+        <Login onLogin={(user) => { setError(''); setMe(user); }} />
+      )}
+    </>
   );
 }

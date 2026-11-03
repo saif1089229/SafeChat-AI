@@ -18,12 +18,16 @@ body {
 }
 
 .app-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   background: #4f46e5;
   color: #fff;
   padding: 12px 20px;
 }
 
 .app-header h1 {
+  flex: 1;
   margin: 0;
   font-size: 22px;
   font-weight: 600;
@@ -81,6 +85,7 @@ body {
 
 /* Messages area */
 .chat-main {
+  min-width: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -176,4 +181,64 @@ body {
 
 .send-button:hover {
   background: #4338ca;
+}
+
+.profiles-panel {
+  width: 300px;
+  flex-shrink: 0;
+  padding: 16px;
+  overflow-y: auto;
+  background: #f9fafb;
+  border-left: 1px solid #e5e7eb;
+}
+
+.profiles-panel h2 {
+  font-size: 18px;
+}
+
+.profiles-panel p {
+  overflow-wrap: anywhere;
+}
+
+.profiles-panel label, .login-page label {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.profiles-panel input, .profiles-panel textarea, .login-page input {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-top: 4px;
+  font: inherit;
+}
+
+.person {
+  padding: 12px 0;
+  border-bottom: 1px solid #d1d5db;
+}
+
+.person-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+button:disabled {
+  opacity: .6;
+  cursor: default;
+}
+
+.login-page {
+  max-width: 400px;
+  margin: 60px auto;
+  padding: 20px;
+}
+
+@media (max-width: 800px) {
+  .chat-app { height: auto; min-height: 100vh; }
+  .chat-body { flex-wrap: wrap; overflow: visible; }
+  .channel-list { width: 100%; }
+  .chat-main { flex-basis: 100%; min-height: 400px; }
+  .profiles-panel { width: 100%; }
 }
