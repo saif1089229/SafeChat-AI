@@ -1,39 +1,46 @@
-import os
-
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, select
 from sqlmodel import Field as SQLField
+
+from accounts import User
+from database import engine, get_session
+from profiles import current_user, router
+
+ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
 
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:5173', 'http://127.0.0.1:5173'],
-    allow_methods=['GET', 'POST'],
+    allow_origins=ORIGINS,
+    allow_credentials=True,
+    allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],
     allow_headers=['Content-Type'],
 )
 
-engine = create_engine(os.getenv(
-    'DATABASE_URL',
-    'postgresql+psycopg://postgres@127.0.0.1:5433/safechat_ai',
-))
+app.include_router(router)
 
 
-def get_session():
-    with Session(engine) as session:
-        yield session
+@app.middleware('http')
+async def check_origin(request: Request, call_next):
+    origin = request.headers.get('origin')
+    if request.method in ('POST', 'PATCH', 'DELETE') and origin and origin not in ORIGINS:
+        return JSONResponse(status_code=403, content={'detail': 'Origin is not allowed.'})
+    return await call_next(request)
 
 
 class MessageRequest(BaseModel):
-    user_id: int
+    model_config = ConfigDict(extra='forbid')
     channel_id: int
     text: str = Field(min_length=1)
 
 
 class MessageResponse(MessageRequest):
     id: int
+    user_id: int
 
 
 class Message(SQLModel, table=True):
@@ -60,10 +67,10 @@ async def classify(message: TextMessage):
 
 
 @app.post('/messages', response_model=MessageResponse, status_code=201)
-def create_message(message: MessageRequest, session: Session = Depends(get_session)):
+def create_message(message: MessageRequest, user: User = Depends(current_user), session: Session = Depends(get_session)):
     if not message.text.strip():
         raise HTTPException(status_code=422, detail='Message cannot be blank.')
-    saved_message = Message(**message.model_dump())
+    saved_message = Message(**message.model_dump(), user_id=user.id)
     session.add(saved_message)
     try:
         session.commit()
@@ -75,5 +82,5 @@ def create_message(message: MessageRequest, session: Session = Depends(get_sessi
 
 
 @app.get('/messages', response_model=list[MessageResponse])
-def get_messages(session: Session = Depends(get_session)):
+def get_messages(user: User = Depends(current_user), session: Session = Depends(get_session)):
     return session.exec(select(Message).order_by(Message.id)).all()
