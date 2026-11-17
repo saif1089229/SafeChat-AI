@@ -28,6 +28,7 @@ ALTER TABLE "Messages"
 
 -- One policy per moderation category. Scores run from 0 to 1.
 -- An empty block_threshold means the category only warns.
+-- Plain insults only warn so the student can rewrite them. Threats and hate still block.
 CREATE SEQUENCE IF NOT EXISTS safechat_policy_id_seq;
 ALTER TABLE "Policies" ALTER COLUMN id SET DEFAULT nextval('safechat_policy_id_seq');
 ALTER SEQUENCE safechat_policy_id_seq OWNED BY "Policies".id;
@@ -42,7 +43,7 @@ ALTER TABLE "Policies" ADD CONSTRAINT policy_thresholds_check CHECK (
 );
 
 INSERT INTO "Policies" (name, warn_threshold, block_threshold) VALUES
-    ('harassment', 0.4, 0.8),
+    ('harassment', 0.4, NULL),
     ('harassment/threatening', 0.3, 0.6),
     ('hate', 0.4, 0.8),
     ('hate/threatening', 0.3, 0.6),
@@ -57,6 +58,10 @@ INSERT INTO "Policies" (name, warn_threshold, block_threshold) VALUES
     ('violence/graphic', 0.5, 0.85),
     ('unsafe link', 0.5, 1.0)
 ON CONFLICT (name) DO NOTHING;
+
+-- Databases created before this change still have the old harassment value.
+UPDATE "Policies" SET block_threshold = NULL
+WHERE name = 'harassment' AND block_threshold = REAL '0.8';
 
 -- Moderation log. Blocked content is never stored, only the outcome.
 CREATE SEQUENCE IF NOT EXISTS safechat_event_id_seq;
