@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 
-export default function ProfilesAndFriends({ me, onProfileChange }) {
+export default function ProfilesAndFriends({ me, onProfileChange, onMessage }) {
   const [name, setName] = useState(me.name);
   const [bio, setBio] = useState(me.bio);
   const [users, setUsers] = useState([]);
@@ -102,7 +102,14 @@ export default function ProfilesAndFriends({ me, onProfileChange }) {
 
       <h2>Friends</h2>
       {friends.length === 0 ? <p>No friends yet.</p> : (
-        <ul>{friends.map((friend) => <li key={friend.id}>{friend.name}</li>)}</ul>
+        <ul>
+          {friends.map((friend) => (
+            <li key={friend.id} className="friend">
+              {friend.name}
+              <button type="button" onClick={() => onMessage(friend.id)}>Message</button>
+            </li>
+          ))}
+        </ul>
       )}
 
       <h2>People</h2>

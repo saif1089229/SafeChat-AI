@@ -1,40 +1,47 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 import { api } from './api';
 import Login from './Login';
 import ProfilesAndFriends from './ProfilesAndFriends';
 
-const CHANNELS = [
-  { id: 1, name: '# general' },
-];
-
 function ChannelList({ channels, activeId, onSelect }) {
+  const groups = [
+    ['Channels', channels.filter((channel) => !channel.direct_user_id)],
+    ['Direct messages', channels.filter((channel) => channel.direct_user_id)],
+  ];
   return (
     <aside className="channel-list" aria-label="Channel list">
-      <h2>Channels</h2>
-      <ul>
-        {channels.map((channel) => (
-          <li key={channel.id}>
-            <button
-              type="button"
-              className={channel.id === activeId ? 'channel active' : 'channel'}
-              onClick={() => onSelect(channel.id)}
-            >
-              {channel.name}
-            </button>
-          </li>
-        ))}
-      </ul>
+      {groups.map(([title, list]) => list.length > 0 && (
+        <div key={title}>
+          <h2>{title}</h2>
+          <ul>
+            {list.map((channel) => (
+              <li key={channel.id}>
+                <button
+                  type="button"
+                  className={channel.id === activeId ? 'channel active' : 'channel'}
+                  onClick={() => onSelect(channel.id)}
+                >
+                  {channel.direct_user_id ? channel.name : `# ${channel.name}`}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </aside>
   );
 }
 
-function MessagesArea({ messages }) {
+function MessagesArea({ messages, userName }) {
   return (
     <section className="messages" aria-label="Messages">
       {messages.map((message) => (
         <article key={message.id} className="message">
-          <strong className="author">User {message.user_id}</strong>
+          <strong className="author">{userName(message.user_id)}</strong>
+          <time className="time" dateTime={message.created_at}>
+            {new Date(message.created_at).toLocaleString()}
+          </time>
           <p className="text">{message.text}</p>
         </article>
       ))}
@@ -42,16 +49,25 @@ function MessagesArea({ messages }) {
   );
 }
 
-function WarningArea({ warning }) {
+function WarningArea({ warning, busy, onEdit, onRewrite, onSendAnyway }) {
   return (
-    <div className="warning" aria-label="Warning area">
+    <div className="warning" aria-label="Warning area" aria-live="polite">
       <span className="warning-label">Warning:</span>
-      <span className="warning-text">{warning}</span>
+      <span className="warning-text">{warning ? warning.text : 'No warnings.'}</span>
+      {warning?.moderated && (
+        <div className="warning-actions">
+          <button type="button" onClick={onEdit}>Edit message</button>
+          <button type="button" disabled={busy} onClick={onRewrite}>Safe Rewrite</button>
+          {warning.canSend && (
+            <button type="button" disabled={busy} onClick={onSendAnyway}>Send anyway</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function MessageInput({ value, onChange, onSend, onImage, busy }) {
+function MessageInput({ value, onChange, onSend, onImage, busy, inputRef }) {
   return (
     <form
       className="input-bar"
@@ -61,6 +77,7 @@ function MessageInput({ value, onChange, onSend, onImage, busy }) {
       }}
     >
       <textarea
+        ref={inputRef}
         className="message-input"
         placeholder="Type a message..."
         value={value}
@@ -78,20 +95,44 @@ function MessageInput({ value, onChange, onSend, onImage, busy }) {
 }
 
 function Chat({ me, onProfileChange, onLogout }) {
-  const [activeChannel, setActiveChannel] = useState(CHANNELS[0].id);
+  const [channels, setChannels] = useState([]);
+  const [activeChannel, setActiveChannel] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [blockedIds, setBlockedIds] = useState([]);
   const [draft, setDraft] = useState('');
   const [messages, setMessages] = useState([]);
-  const [warning, setWarning] = useState('No warnings.');
+  const [warning, setWarning] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const inputRef = useRef(null);
 
   useEffect(() => {
+    let active = true;
+    Promise.all([api('/channels'), api('/users'), api('/blocks')])
+      .then(([savedChannels, people, blocked]) => {
+        if (!active) return;
+        setChannels(savedChannels);
+        setUsers(people);
+        setBlockedIds(blocked.map((user) => user.id));
+        setActiveChannel(savedChannels[0]?.id ?? null);
+      })
+      .catch(() => {
+        if (active) {
+          setError('Could not load channels. Check that the backend is running.');
+          setLoading(false);
+        }
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (activeChannel === null) return;
     const controller = new AbortController();
 
     async function loadMessages() {
       try {
-        const savedMessages = await api('/messages', {
+        const savedMessages = await api(`/messages?channel_id=${activeChannel}`, {
           signal: controller.signal,
         });
         setMessages(savedMessages);
@@ -106,9 +147,32 @@ function Chat({ me, onProfileChange, onLogout }) {
 
     loadMessages();
     return () => controller.abort();
-  }, []);
+  }, [activeChannel]);
 
-  const handleSend = async () => {
+  const selectChannel = (id) => {
+    if (id === activeChannel) return;
+    setActiveChannel(id);
+    setMessages([]);
+    setLoading(true);
+    setWarning(null);
+    setError('');
+  };
+
+  const openDirectChat = async (userId) => {
+    setError('');
+    try {
+      const channel = await api('/direct-messages', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: userId }),
+      });
+      setChannels((list) => list.some((c) => c.id === channel.id) ? list : [...list, channel]);
+      selectChannel(channel.id);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleSend = async (confirm = false) => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
@@ -117,20 +181,75 @@ function Chat({ me, onProfileChange, onLogout }) {
       const savedMessage = await api('/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_id: activeChannel, text }),
+        body: JSON.stringify({ channel_id: activeChannel, text, confirm }),
       });
       setMessages((current) => [...current, savedMessage]);
       setDraft((current) => current.trim() === text ? '' : current);
-      setWarning('No warnings.');
-    } catch {
-      setError('Could not send message. Your text has been kept so you can try again.');
+      setWarning(null);
+    } catch (err) {
+      if (err.status === 409 || err.status === 422) {
+        setWarning({ text: err.message, moderated: true, canSend: err.status === 409 });
+      } else if (err.status === 403) {
+        setError(err.message);
+      } else {
+        setError('Could not send message. Your text has been kept so you can try again.');
+      }
     } finally {
       setSending(false);
     }
   };
 
+  const handleRewrite = async () => {
+    setSending(true);
+    setError('');
+    try {
+      const suggestion = await api('/rewrite', {
+        method: 'POST',
+        body: JSON.stringify({ text: draft.trim() }),
+      });
+      setDraft(suggestion.text);
+      setWarning(null);
+      inputRef.current?.focus();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleEdit = () => {
+    setWarning(null);
+    inputRef.current?.focus();
+  };
+
+  // A new draft has not been checked yet, so the old warning no longer applies.
+  const handleDraftChange = (value) => {
+    setDraft(value);
+    if (warning?.moderated) setWarning(null);
+  };
+
   const handleImage = () => {
-    setWarning('Image upload is not available yet.');
+    setWarning({ text: 'Image upload is not available yet.' });
+  };
+
+  const current = channels.find((channel) => channel.id === activeChannel);
+  const directUserId = current?.direct_user_id;
+  const isBlocked = blockedIds.includes(directUserId);
+  const userName = (id) => id === me.id ? me.name : users.find((user) => user.id === id)?.name || `User ${id}`;
+
+  const toggleBlock = async () => {
+    setError('');
+    try {
+      if (isBlocked) {
+        await api(`/blocks/${directUserId}`, { method: 'DELETE' });
+        setBlockedIds((ids) => ids.filter((id) => id !== directUserId));
+      } else {
+        await api('/blocks', { method: 'POST', body: JSON.stringify({ user_id: directUserId }) });
+        setBlockedIds((ids) => [...ids, directUserId]);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   return (
@@ -142,24 +261,39 @@ function Chat({ me, onProfileChange, onLogout }) {
       </header>
       <div className="chat-body">
         <ChannelList
-          channels={CHANNELS}
+          channels={channels}
           activeId={activeChannel}
-          onSelect={setActiveChannel}
+          onSelect={selectChannel}
         />
         <main className="chat-main">
+          {current && (
+            <div className="chat-title">
+              <h2>{directUserId ? current.name : `# ${current.name}`}</h2>
+              {directUserId && (
+                <button type="button" onClick={toggleBlock}>{isBlocked ? 'Unblock' : 'Block'}</button>
+              )}
+            </div>
+          )}
           {loading && <p role="status">Loading messages...</p>}
           {error && <p role="alert">{error}</p>}
-          <MessagesArea messages={messages} />
-          <WarningArea warning={warning} />
+          <MessagesArea messages={messages} userName={userName} />
+          <WarningArea
+            warning={warning}
+            busy={sending}
+            onEdit={handleEdit}
+            onRewrite={handleRewrite}
+            onSendAnyway={() => handleSend(true)}
+          />
           <MessageInput
             value={draft}
-            onChange={setDraft}
-            onSend={handleSend}
+            onChange={handleDraftChange}
+            onSend={() => handleSend()}
             onImage={handleImage}
             busy={sending || loading}
+            inputRef={inputRef}
           />
         </main>
-        <ProfilesAndFriends me={me} onProfileChange={onProfileChange} />
+        <ProfilesAndFriends me={me} onProfileChange={onProfileChange} onMessage={openDirectChat} />
       </div>
     </div>
   );
