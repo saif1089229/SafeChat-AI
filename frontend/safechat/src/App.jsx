@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import './App.css';
-import { api } from './api';
+import AdminDashboard from './AdminDashboard';
+import { API_URL, api } from './api';
 import Login from './Login';
 import ProfilesAndFriends from './ProfilesAndFriends';
 
@@ -33,7 +34,7 @@ function ChannelList({ channels, activeId, onSelect }) {
   );
 }
 
-function MessagesArea({ messages, userName }) {
+function MessagesArea({ messages, userName, meId, onReport }) {
   return (
     <section className="messages" aria-label="Messages">
       {messages.map((message) => (
@@ -42,22 +43,34 @@ function MessagesArea({ messages, userName }) {
           <time className="time" dateTime={message.created_at}>
             {new Date(message.created_at).toLocaleString()}
           </time>
-          <p className="text">{message.text}</p>
+          {message.image_path && (
+            <img className="message-image" src={`${API_URL}/images/${message.image_path}`} alt={`Image from ${userName(message.user_id)}`} />
+          )}
+          {message.text && <p className="text">{message.text}</p>}
+          {message.user_id !== meId && (
+            <button type="button" className="report-button" onClick={() => onReport(message.id)}>Report</button>
+          )}
         </article>
       ))}
     </section>
   );
 }
 
-function WarningArea({ warning, busy, onEdit, onRewrite, onSendAnyway }) {
+function WarningArea({ warning, busy, onEdit, onRewrite, onChooseImage, onSendAnyway }) {
   return (
     <div className="warning" aria-label="Warning area" aria-live="polite">
       <span className="warning-label">Warning:</span>
       <span className="warning-text">{warning ? warning.text : 'No warnings.'}</span>
       {warning?.moderated && (
         <div className="warning-actions">
-          <button type="button" onClick={onEdit}>Edit message</button>
-          <button type="button" disabled={busy} onClick={onRewrite}>Safe Rewrite</button>
+          {warning.image ? (
+            <button type="button" onClick={onChooseImage}>Choose another image</button>
+          ) : (
+            <>
+              <button type="button" onClick={onEdit}>Edit message</button>
+              <button type="button" disabled={busy} onClick={onRewrite}>Safe Rewrite</button>
+            </>
+          )}
           {warning.canSend && (
             <button type="button" disabled={busy} onClick={onSendAnyway}>Send anyway</button>
           )}
@@ -105,7 +118,11 @@ function Chat({ me, onProfileChange, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [image, setImage] = useState(null);
+  const [showAdmin, setShowAdmin] = useState(false);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -156,6 +173,7 @@ function Chat({ me, onProfileChange, onLogout }) {
     setLoading(true);
     setWarning(null);
     setError('');
+    setNotice('');
   };
 
   const openDirectChat = async (userId) => {
@@ -228,8 +246,58 @@ function Chat({ me, onProfileChange, onLogout }) {
     if (warning?.moderated) setWarning(null);
   };
 
-  const handleImage = () => {
-    setWarning({ text: 'Image upload is not available yet.' });
+  const chooseImage = () => fileInputRef.current?.click();
+
+  const clearImage = () => {
+    if (image) URL.revokeObjectURL(image.url);
+    setImage(null);
+  };
+
+  const handleImageChosen = (event) => {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    clearImage();
+    setImage({ file, url: URL.createObjectURL(file) });
+    setWarning(null);
+    setError('');
+  };
+
+  const sendImage = async (confirm = false) => {
+    if (!image || sending) return;
+    setSending(true);
+    setError('');
+    const form = new FormData();
+    form.append('channel_id', activeChannel);
+    form.append('image', image.file);
+    form.append('confirm', confirm);
+    try {
+      const savedMessage = await api('/messages/image', { method: 'POST', body: form });
+      setMessages((current) => [...current, savedMessage]);
+      clearImage();
+      setWarning(null);
+    } catch (err) {
+      if (err.status === 409 || err.status === 422) {
+        setWarning({ text: err.message, moderated: true, canSend: err.status === 409, image: true });
+      } else {
+        setError(err.status ? err.message : 'Could not send image. Please try again.');
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const reportMessage = async (messageId) => {
+    const reason = window.prompt('Why are you reporting this message?');
+    if (!reason?.trim()) return;
+    setError('');
+    setNotice('');
+    try {
+      await api('/reports', { method: 'POST', body: JSON.stringify({ message_id: messageId, reason }) });
+      setNotice('Report sent. An admin will review it.');
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const current = channels.find((channel) => channel.id === activeChannel);
@@ -257,44 +325,67 @@ function Chat({ me, onProfileChange, onLogout }) {
       <header className="app-header">
         <h1>SafeChat AI</h1>
         <span>{me.name}</span>
+        {me.role === 'admin' && (
+          <button type="button" onClick={() => setShowAdmin((open) => !open)}>
+            {showAdmin ? 'Back to chat' : 'Admin dashboard'}
+          </button>
+        )}
         <button type="button" onClick={onLogout}>Sign out</button>
       </header>
-      <div className="chat-body">
-        <ChannelList
-          channels={channels}
-          activeId={activeChannel}
-          onSelect={selectChannel}
-        />
-        <main className="chat-main">
-          {current && (
-            <div className="chat-title">
-              <h2>{directUserId ? current.name : `# ${current.name}`}</h2>
-              {directUserId && (
-                <button type="button" onClick={toggleBlock}>{isBlocked ? 'Unblock' : 'Block'}</button>
-              )}
-            </div>
-          )}
-          {loading && <p role="status">Loading messages...</p>}
-          {error && <p role="alert">{error}</p>}
-          <MessagesArea messages={messages} userName={userName} />
-          <WarningArea
-            warning={warning}
-            busy={sending}
-            onEdit={handleEdit}
-            onRewrite={handleRewrite}
-            onSendAnyway={() => handleSend(true)}
+      {showAdmin ? <AdminDashboard userName={userName} /> : (
+        <div className="chat-body">
+          <ChannelList
+            channels={channels}
+            activeId={activeChannel}
+            onSelect={selectChannel}
           />
-          <MessageInput
-            value={draft}
-            onChange={handleDraftChange}
-            onSend={() => handleSend()}
-            onImage={handleImage}
-            busy={sending || loading}
-            inputRef={inputRef}
-          />
-        </main>
-        <ProfilesAndFriends me={me} onProfileChange={onProfileChange} onMessage={openDirectChat} />
-      </div>
+          <main className="chat-main">
+            {current && (
+              <div className="chat-title">
+                <h2>{directUserId ? current.name : `# ${current.name}`}</h2>
+                {directUserId && (
+                  <button type="button" onClick={toggleBlock}>{isBlocked ? 'Unblock' : 'Block'}</button>
+                )}
+              </div>
+            )}
+            {loading && <p role="status">Loading messages...</p>}
+            {error && <p role="alert">{error}</p>}
+            {notice && <p role="status">{notice}</p>}
+            <MessagesArea messages={messages} userName={userName} meId={me.id} onReport={reportMessage} />
+            <WarningArea
+              warning={warning}
+              busy={sending}
+              onEdit={handleEdit}
+              onRewrite={handleRewrite}
+              onChooseImage={chooseImage}
+              onSendAnyway={() => (warning?.image ? sendImage(true) : handleSend(true))}
+            />
+            {image && (
+              <div className="image-preview">
+                <img src={image.url} alt="Selected image preview" />
+                <button type="button" disabled={sending} onClick={() => sendImage()}>Send image</button>
+                <button type="button" disabled={sending} onClick={clearImage}>Cancel</button>
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              hidden
+              onChange={handleImageChosen}
+            />
+            <MessageInput
+              value={draft}
+              onChange={handleDraftChange}
+              onSend={() => handleSend()}
+              onImage={chooseImage}
+              busy={sending || loading}
+              inputRef={inputRef}
+            />
+          </main>
+          <ProfilesAndFriends me={me} onProfileChange={onProfileChange} onMessage={openDirectChat} />
+        </div>
+      )}
     </div>
   );
 }
