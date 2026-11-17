@@ -11,6 +11,21 @@ body {
   min-height: 100vh;
 }
 
+button {
+  padding: 6px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2937;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #f3f4f6;
+}
+
 .chat-app {
   display: flex;
   flex-direction: column;
@@ -19,8 +34,9 @@ body {
 
 .app-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 12px 16px;
   background: #4f46e5;
   color: #fff;
   padding: 12px 20px;
@@ -31,6 +47,16 @@ body {
   margin: 0;
   font-size: 22px;
   font-weight: 600;
+}
+
+.app-header button {
+  background: transparent;
+  border-color: rgba(255, 255, 255, .7);
+  color: #fff;
+}
+
+.app-header button:hover {
+  background: rgba(255, 255, 255, .15);
 }
 
 .chat-body {
@@ -92,6 +118,10 @@ body {
   background: #fff;
 }
 
+.chat-main > p {
+  margin: 8px 16px 0;
+}
+
 .messages {
   flex: 1;
   padding: 16px;
@@ -107,6 +137,12 @@ body {
   border-radius: 8px;
   padding: 8px 12px;
   max-width: 70%;
+}
+
+.message.mine {
+  align-self: flex-end;
+  background: #eef2ff;
+  border-color: #c7d2fe;
 }
 
 .message .author {
@@ -142,6 +178,26 @@ body {
   font-size: 12px;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.report-button:hover {
+  background: none;
+  color: #374151;
+}
+
+.report-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.report-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font: inherit;
 }
 
 .image-preview {
@@ -210,7 +266,7 @@ body {
 
 /* Warning area */
 .warning {
-  margin: 0 16px;
+  margin: 8px 16px 0;
   padding: 8px 12px;
   background: #fff7ed;
   border: 1px solid #fdba74;
@@ -309,6 +365,8 @@ body {
   width: 100%;
   padding: 8px;
   margin-top: 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
   font: inherit;
 }
 
@@ -330,8 +388,38 @@ button:disabled {
 
 .login-page {
   max-width: 400px;
-  margin: 60px auto;
-  padding: 20px;
+  margin: 80px auto;
+  padding: 0 20px;
+}
+
+.login-page h1 {
+  color: #4f46e5;
+  text-align: center;
+}
+
+.login-page form {
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+}
+
+.login-page h2 {
+  margin-top: 0;
+}
+
+.login-page button {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  background: #4f46e5;
+  color: #fff;
+  font-weight: 600;
+}
+
+.login-page button:hover {
+  background: #4338ca;
 }
 
 @media (max-width: 800px) {
@@ -339,5 +427,7 @@ button:disabled {
   .chat-body { flex-wrap: wrap; overflow: visible; }
   .channel-list { width: 100%; }
   .chat-main { flex-basis: 100%; min-height: 400px; }
+  .messages { max-height: 60vh; }
+  .message { max-width: 85%; }
   .profiles-panel { width: 100%; }
 }

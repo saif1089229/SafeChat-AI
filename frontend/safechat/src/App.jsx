@@ -34,34 +34,68 @@ function ChannelList({ channels, activeId, onSelect }) {
   );
 }
 
-function MessagesArea({ messages, userName, meId, onReport }) {
+function ReportForm({ onSend, onCancel }) {
+  const [reason, setReason] = useState('');
   return (
-    <section className="messages" aria-label="Messages">
-      {messages.map((message) => (
-        <article key={message.id} className="message">
-          <strong className="author">{userName(message.user_id)}</strong>
-          <time className="time" dateTime={message.created_at}>
-            {new Date(message.created_at).toLocaleString()}
-          </time>
-          {message.image_path && (
-            <img className="message-image" src={`${API_URL}/images/${message.image_path}`} alt={`Image from ${userName(message.user_id)}`} />
-          )}
-          {message.text && <p className="text">{message.text}</p>}
-          {message.user_id !== meId && (
-            <button type="button" className="report-button" onClick={() => onReport(message.id)}>Report</button>
-          )}
-        </article>
-      ))}
+    <form className="report-form" onSubmit={(e) => { e.preventDefault(); onSend(reason); }}>
+      <input
+        aria-label="Report reason"
+        placeholder="Why are you reporting this message?"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        maxLength={300}
+        autoFocus
+      />
+      <button type="submit" disabled={!reason.trim()}>Send report</button>
+      <button type="button" onClick={onCancel}>Cancel</button>
+    </form>
+  );
+}
+
+function MessagesArea({ messages, userName, meId, reportingId, onReport, onSendReport, onCancelReport }) {
+  const listRef = useRef(null);
+
+  // Keep the newest message in view when one arrives.
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages.length]);
+
+  return (
+    <section className="messages" aria-label="Messages" ref={listRef}>
+      {messages.map((message) => {
+        const imageUrl = message.image_path && `${API_URL}/images/${message.image_path}`;
+        return (
+          <article key={message.id} className={message.user_id === meId ? 'message mine' : 'message'}>
+            <strong className="author">{userName(message.user_id)}</strong>
+            <time className="time" dateTime={message.created_at}>
+              {new Date(message.created_at).toLocaleString()}
+            </time>
+            {imageUrl && (
+              <a href={imageUrl} target="_blank" rel="noreferrer" title="Open full size">
+                <img className="message-image" src={imageUrl} alt={`Image from ${userName(message.user_id)}`} />
+              </a>
+            )}
+            {message.text && <p className="text">{message.text}</p>}
+            {message.user_id !== meId && reportingId !== message.id && (
+              <button type="button" className="report-button" onClick={() => onReport(message.id)}>Report</button>
+            )}
+            {reportingId === message.id && (
+              <ReportForm onSend={(reason) => onSendReport(message.id, reason)} onCancel={onCancelReport} />
+            )}
+          </article>
+        );
+      })}
     </section>
   );
 }
 
 function WarningArea({ warning, busy, onEdit, onRewrite, onChooseImage, onSendAnyway }) {
+  if (!warning) return null;
   return (
-    <div className="warning" aria-label="Warning area" aria-live="polite">
+    <div className="warning" aria-label="Warning area" role="alert">
       <span className="warning-label">Warning:</span>
-      <span className="warning-text">{warning ? warning.text : 'No warnings.'}</span>
-      {warning?.moderated && (
+      <span className="warning-text">{warning.text}</span>
+      {warning.moderated && (
         <div className="warning-actions">
           {warning.image ? (
             <button type="button" onClick={onChooseImage}>Choose another image</button>
@@ -121,6 +155,8 @@ function Chat({ me, onProfileChange, onLogout }) {
   const [notice, setNotice] = useState('');
   const [image, setImage] = useState(null);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showPanel, setShowPanel] = useState(true);
+  const [reportingId, setReportingId] = useState(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -162,9 +198,23 @@ function Chat({ me, onProfileChange, onLogout }) {
       }
     }
 
+    // Check for new messages every few seconds so other people's messages appear.
     loadMessages();
-    return () => controller.abort();
+    const timer = setInterval(loadMessages, 3000);
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
   }, [activeChannel]);
+
+  // New direct chats opened by a friend appear without a reload.
+  // A failed check is simply tried again on the next tick.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      api('/channels').then(setChannels).catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   const selectChannel = (id) => {
     if (id === activeChannel) return;
@@ -174,6 +224,7 @@ function Chat({ me, onProfileChange, onLogout }) {
     setWarning(null);
     setError('');
     setNotice('');
+    setReportingId(null);
   };
 
   const openDirectChat = async (userId) => {
@@ -190,6 +241,11 @@ function Chat({ me, onProfileChange, onLogout }) {
     }
   };
 
+  // The regular refresh may already have loaded the message we just sent.
+  const addMessage = (savedMessage) => {
+    setMessages((current) => current.some((m) => m.id === savedMessage.id) ? current : [...current, savedMessage]);
+  };
+
   const handleSend = async (confirm = false) => {
     const text = draft.trim();
     if (!text || sending) return;
@@ -201,7 +257,7 @@ function Chat({ me, onProfileChange, onLogout }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel_id: activeChannel, text, confirm }),
       });
-      setMessages((current) => [...current, savedMessage]);
+      addMessage(savedMessage);
       setDraft((current) => current.trim() === text ? '' : current);
       setWarning(null);
     } catch (err) {
@@ -273,7 +329,7 @@ function Chat({ me, onProfileChange, onLogout }) {
     form.append('confirm', confirm);
     try {
       const savedMessage = await api('/messages/image', { method: 'POST', body: form });
-      setMessages((current) => [...current, savedMessage]);
+      addMessage(savedMessage);
       clearImage();
       setWarning(null);
     } catch (err) {
@@ -287,13 +343,12 @@ function Chat({ me, onProfileChange, onLogout }) {
     }
   };
 
-  const reportMessage = async (messageId) => {
-    const reason = window.prompt('Why are you reporting this message?');
-    if (!reason?.trim()) return;
+  const reportMessage = async (messageId, reason) => {
     setError('');
     setNotice('');
     try {
       await api('/reports', { method: 'POST', body: JSON.stringify({ message_id: messageId, reason }) });
+      setReportingId(null);
       setNotice('Report sent. An admin will review it.');
     } catch (err) {
       setError(err.message);
@@ -330,6 +385,11 @@ function Chat({ me, onProfileChange, onLogout }) {
             {showAdmin ? 'Back to chat' : 'Admin dashboard'}
           </button>
         )}
+        {!showAdmin && (
+          <button type="button" onClick={() => setShowPanel((open) => !open)}>
+            {showPanel ? 'Hide profile' : 'Profile and friends'}
+          </button>
+        )}
         <button type="button" onClick={onLogout}>Sign out</button>
       </header>
       {showAdmin ? <AdminDashboard userName={userName} /> : (
@@ -351,7 +411,15 @@ function Chat({ me, onProfileChange, onLogout }) {
             {loading && <p role="status">Loading messages...</p>}
             {error && <p role="alert">{error}</p>}
             {notice && <p role="status">{notice}</p>}
-            <MessagesArea messages={messages} userName={userName} meId={me.id} onReport={reportMessage} />
+            <MessagesArea
+              messages={messages}
+              userName={userName}
+              meId={me.id}
+              reportingId={reportingId}
+              onReport={setReportingId}
+              onSendReport={reportMessage}
+              onCancelReport={() => setReportingId(null)}
+            />
             <WarningArea
               warning={warning}
               busy={sending}
@@ -383,7 +451,7 @@ function Chat({ me, onProfileChange, onLogout }) {
               inputRef={inputRef}
             />
           </main>
-          <ProfilesAndFriends me={me} onProfileChange={onProfileChange} onMessage={openDirectChat} />
+          {showPanel && <ProfilesAndFriends me={me} onProfileChange={onProfileChange} onMessage={openDirectChat} />}
         </div>
       )}
     </div>
