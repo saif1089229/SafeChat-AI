@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
@@ -15,6 +15,19 @@ class User(SQLModel, table=True):
     email: str | None = None
     bio: str = ''
     password_hash: str | None = None
+    role: str = 'student'
+
+
+class Message(SQLModel, table=True):
+    __tablename__ = 'Messages'
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int
+    channel_id: int
+    text: str
+    image_path: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc),
+                                 sa_column=Column(DateTime(timezone=True), nullable=False))
 
 
 class LoginSession(SQLModel, table=True):

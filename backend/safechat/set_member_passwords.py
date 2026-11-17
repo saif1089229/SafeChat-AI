@@ -4,7 +4,7 @@ from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from accounts import LoginSession, User, hash_password
-from main import engine
+from database import engine
 
 MEMBERS = [
     '1089229@students.adu.ac.ae',

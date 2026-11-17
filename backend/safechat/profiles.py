@@ -19,6 +19,7 @@ class ProfileResponse(BaseModel):
     name: str
     email: str
     bio: str
+    role: str
 
 
 class ProfileUpdate(BaseModel):

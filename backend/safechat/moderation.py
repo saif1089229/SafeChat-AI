@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 from datetime import datetime, timezone
@@ -44,15 +45,24 @@ class ModerationEvent(SQLModel, table=True):
     review_status: str = 'open'
 
 
-def text_scores(text):
+def openai_scores(content):
     response = httpx.post(
         'https://api.openai.com/v1/moderations',
         headers={'Authorization': f'Bearer {os.environ["OPENAI_API_KEY"]}'},
-        json={'model': 'omni-moderation-latest', 'input': text},
-        timeout=5,
+        json={'model': 'omni-moderation-latest', 'input': content},
+        timeout=10,
     )
     response.raise_for_status()
     return response.json()['results'][0]['category_scores']
+
+
+def text_scores(text):
+    return openai_scores(text)
+
+
+def image_scores(data, content_type):
+    url = f'data:{content_type};base64,{base64.b64encode(data).decode()}'
+    return openai_scores([{'type': 'image_url', 'image_url': {'url': url}}])
 
 
 def has_unsafe_link(text):
@@ -91,7 +101,18 @@ def check_text(text, policies):
             scores['unsafe link'] = 1.0
     except (KeyError, httpx.HTTPError):
         unchecked = True
+    return decide(scores, unchecked, policies)
 
+
+def check_image(data, content_type, policies):
+    try:
+        return decide(image_scores(data, content_type), False, policies)
+    except (KeyError, httpx.HTTPError):
+        return decide({}, True, policies)
+
+
+def decide(scores, unchecked, policies):
+    """Compare scores with each policy. A block beats a warning, then the highest score wins."""
     flagged = []
     for policy in policies:
         score = scores.get(policy.name, 0)
