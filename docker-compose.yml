@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: safechat_ai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # A new database runs these files once, in this order.
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/1_schema.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/2_seed.sql:ro
+      - ./database/profiles_friends.sql:/docker-entrypoint-initdb.d/3_profiles_friends.sql:ro
+      - ./database/direct_messages_moderation.sql:/docker-entrypoint-initdb.d/4_direct_messages_moderation.sql:ro
+      - ./database/images_reports_admin.sql:/docker-entrypoint-initdb.d/5_images_reports_admin.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d safechat_ai"]
+      interval: 5s
+      retries: 12
+
+  backend:
+    build: ./backend/safechat
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@db:5432/safechat_ai
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SAFE_BROWSING_API_KEY: ${SAFE_BROWSING_API_KEY:-}
+      OPENAI_REWRITE_MODEL: ${OPENAI_REWRITE_MODEL:-gpt-4o-mini}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "127.0.0.1:8014:8014"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend/safechat
+      args:
+        VITE_API_URL: http://127.0.0.1:8014
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  db-data:
+  uploads:
